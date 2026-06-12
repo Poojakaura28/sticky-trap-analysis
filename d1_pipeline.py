@@ -37,17 +37,17 @@ def analyze(img_path):
 
     img_bgr = cv2.resize(img_bgr, (0,0), fx=0.25, fy=0.25)
 
-    # Crop bottom 15% to remove label/handwriting at bottom of trap
+    # Crop bottom 15% to remove label/handwriting
     img_bgr = img_bgr[:int(img_bgr.shape[0] * 0.85), :]
 
     img_hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
     h, s, v = img_hsv[:,:,0], img_hsv[:,:,1], img_hsv[:,:,2]
 
-    # Find the yellow trap region and build an exact contour mask
-    # This handles skewed/angled photos correctly
-    is_yellow = (h>=15)&(h<=45)&(s>80)&(v>80)
+    # ── TRAP MASK ──────────────────────────────────────────────────────────────
+    # Use strict (high saturation) yellow to find trap outline
+    is_yellow_strict = (h>=15)&(h<=45)&(s>180)&(v>80)
     kernel = np.ones((15,15), np.uint8)
-    yellow_clean = cv2.morphologyEx(is_yellow.astype(np.uint8), cv2.MORPH_CLOSE, kernel)
+    yellow_clean = cv2.morphologyEx(is_yellow_strict.astype(np.uint8), cv2.MORPH_CLOSE, kernel)
     yellow_clean = cv2.morphologyEx(yellow_clean, cv2.MORPH_OPEN, kernel)
     contours, _ = cv2.findContours(yellow_clean, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours: return None
@@ -59,10 +59,21 @@ def analyze(img_path):
     total = trap_mask.sum()
     if total == 0: return None
 
-    img_rgb    = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-    is_yel     = (h>=15)&(h<=45)&(s>80)&(v>80)
-    is_glare   = v > 230
-    foreground = (v < 180) & ~is_yel & ~is_glare & trap_mask
+    img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+
+    # ── FOREGROUND DETECTION ───────────────────────────────────────────────────
+    # Only exclude very high saturation yellow (pure trap background)
+    is_yel_strict = (h>=15)&(h<=45)&(s>180)&(v>80)
+    is_glare      = v > 230
+
+    # Dark pixels = dark insects (flies, beetles)
+    is_dark = v < 180
+
+    # Semi-transparent wing pixels: yellow hue but LOWER saturation than background
+    # These are light grey gnats whose wings pick up the yellow background colour
+    is_wing = (h>=15)&(h<=45)&(s>=50)&(s<=180)&(v>60)&(v<230)
+
+    foreground = (is_dark | is_wing) & ~is_yel_strict & ~is_glare & trap_mask
 
     kernel2 = np.ones((2,2), np.uint8)
     cleaned = cv2.morphologyEx(foreground.astype(np.uint8), cv2.MORPH_OPEN, kernel2)
@@ -85,7 +96,7 @@ def analyze(img_path):
         "trap_mask":     trap_mask,
     }
 
-# Load datasheet
+# ── LOAD DATASHEET ─────────────────────────────────────────────────────────────
 df_meta = pd.read_excel(XLSX_IN, sheet_name="Plots")
 df_meta["Plot"] = df_meta["Plot"].astype(int)
 df_meta["Wind_direction"] = df_meta["Wind_direction"].str.strip()
@@ -114,7 +125,8 @@ for img_path in images:
     trt = trt_rate = trt_type = rep = "N/A"
     if not match.empty:
         row = match.iloc[0]
-        trt=row["Trt"]; trt_rate=row["Trt_rate"]; trt_type=row["Trt_type"]; rep=row["Rep"]
+        trt=row["Trt"]; trt_rate=row["Trt_rate"]
+        trt_type=row["Trt_type"]; rep=row["Rep"]
 
     rows.append({
         "filename": img_path.stem, "site": info["site"], "plot": info["plot"],
@@ -135,7 +147,8 @@ for img_path in images:
     axes[1].imshow(overlay); axes[1].axis("off")
     axes[1].set_title(
         f"Insect: {data['insect_pct']}%  |  Sediment: {data['sediment_pct']}%\n"
-        f"Site: {info['site']}  Plot: {info['plot']}  Wind: {info['wind_dir']}  Trt: {trt}", fontsize=9)
+        f"Site: {info['site']}  Plot: {info['plot']}  Wind: {info['wind_dir']}  Trt: {trt}",
+        fontsize=9)
     ip = mpatches.Patch(color=(220/255,50/255,50/255),  label=f"Insect ({data['insect_pct']}%)")
     sp = mpatches.Patch(color=(50/255,100/255,220/255), label=f"Sediment ({data['sediment_pct']}%)")
     axes[1].legend(handles=[ip,sp], loc="lower right", fontsize=8)
@@ -143,13 +156,14 @@ for img_path in images:
     plt.savefig(OUTPUT_DIR / f"{img_path.stem}_result.png", dpi=100, bbox_inches="tight")
     plt.close()
 
-# Build Excel
+# ── BUILD EXCEL ────────────────────────────────────────────────────────────────
 df = pd.DataFrame(rows)
 wb = Workbook()
 FOREST="2C5F2D"; WHITE="FFFFFF"; LIGHT="F0F4F0"
 
 ws1 = wb.active; ws1.title = "Full Results"
-h1 = ["Filename","Site","Plot","Rep","Deployment","Wind Dir","Treatment","Trt Rate","Trt Type","Insect Area %","Sediment Area %"]
+h1 = ["Filename","Site","Plot","Rep","Deployment","Wind Dir",
+      "Treatment","Trt Rate","Trt Type","Insect Area %","Sediment Area %"]
 ws1.append(h1)
 for c in range(1,len(h1)+1):
     cell=ws1.cell(row=1,column=c)
@@ -157,11 +171,13 @@ for c in range(1,len(h1)+1):
     cell.fill=PatternFill("solid",start_color=FOREST)
     cell.alignment=Alignment(horizontal="center")
 for r in rows:
-    ws1.append([r["filename"],r["site"],r["plot"],r["rep"],r["deployment"],r["wind_dir"],
-                r["treatment"],r["trt_rate"],r["trt_type"],r["insect_pct"],r["sediment_pct"]])
+    ws1.append([r["filename"],r["site"],r["plot"],r["rep"],r["deployment"],
+                r["wind_dir"],r["treatment"],r["trt_rate"],r["trt_type"],
+                r["insect_pct"],r["sediment_pct"]])
 for i in range(2,len(rows)+2):
     if i%2==0:
-        for j in range(1,len(h1)+1): ws1.cell(row=i,column=j).fill=PatternFill("solid",start_color=LIGHT)
+        for j in range(1,len(h1)+1):
+            ws1.cell(row=i,column=j).fill=PatternFill("solid",start_color=LIGHT)
 for i,w in enumerate([22,12,6,5,12,9,12,10,12,14,16],1):
     ws1.column_dimensions[get_column_letter(i)].width=w
 
