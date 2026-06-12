@@ -3,9 +3,6 @@ import numpy as np
 from skimage import measure
 import pandas as pd
 from pathlib import Path
-from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Alignment
-from openpyxl.utils import get_column_letter
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 
@@ -159,66 +156,6 @@ for img_path in images:
 # ── BUILD EXCEL ────────────────────────────────────────────────────────────────
 df = pd.DataFrame(rows)
 wb = Workbook()
-FOREST="2C5F2D"; WHITE="FFFFFF"; LIGHT="F0F4F0"
 
-ws1 = wb.active; ws1.title = "Full Results"
-h1 = ["Filename","Site","Plot","Rep","Deployment","Wind Dir",
-      "Treatment","Trt Rate","Trt Type","Insect Area %","Sediment Area %"]
-ws1.append(h1)
-for c in range(1,len(h1)+1):
-    cell=ws1.cell(row=1,column=c)
-    cell.font=Font(bold=True,color=WHITE,name="Arial")
-    cell.fill=PatternFill("solid",start_color=FOREST)
-    cell.alignment=Alignment(horizontal="center")
-for r in rows:
-    ws1.append([r["filename"],r["site"],r["plot"],r["rep"],r["deployment"],
-                r["wind_dir"],r["treatment"],r["trt_rate"],r["trt_type"],
-                r["insect_pct"],r["sediment_pct"]])
-for i in range(2,len(rows)+2):
-    if i%2==0:
-        for j in range(1,len(h1)+1):
-            ws1.cell(row=i,column=j).fill=PatternFill("solid",start_color=LIGHT)
-for i,w in enumerate([22,12,6,5,12,9,12,10,12,14,16],1):
-    ws1.column_dimensions[get_column_letter(i)].width=w
-
-ws2 = wb.create_sheet("Summary by Treatment")
-summary = df.groupby(["treatment","trt_rate","trt_type"]).agg(
-    n_images=("filename","count"), avg_insect=("insect_pct","mean"),
-    avg_sediment=("sediment_pct","mean"), max_sediment=("sediment_pct","max"),
-    min_sediment=("sediment_pct","min")).reset_index().round(3)
-h2=["Treatment","Rate","Type","N Images","Avg Insect %","Avg Sediment %","Max Sediment %","Min Sediment %"]
-ws2.append(h2)
-for c in range(1,len(h2)+1):
-    cell=ws2.cell(row=1,column=c)
-    cell.font=Font(bold=True,color=WHITE,name="Arial")
-    cell.fill=PatternFill("solid",start_color=FOREST)
-    cell.alignment=Alignment(horizontal="center")
-for _,r in summary.iterrows():
-    ws2.append([r["treatment"],r["trt_rate"],r["trt_type"],r["n_images"],
-                r["avg_insect"],r["avg_sediment"],r["max_sediment"],r["min_sediment"]])
-for i,w in enumerate([12,8,12,10,14,16,16,16],1):
-    ws2.column_dimensions[get_column_letter(i)].width=w
-
-ws3 = wb.create_sheet("Summary by Site")
-site_sum = df.groupby(["site","treatment"]).agg(
-    n_images=("filename","count"), avg_insect=("insect_pct","mean"),
-    avg_sediment=("sediment_pct","mean")).reset_index().round(3)
-h3=["Site","Treatment","N Images","Avg Insect %","Avg Sediment %"]
-ws3.append(h3)
-for c in range(1,len(h3)+1):
-    cell=ws3.cell(row=1,column=c)
-    cell.font=Font(bold=True,color=WHITE,name="Arial")
-    cell.fill=PatternFill("solid",start_color=FOREST)
-    cell.alignment=Alignment(horizontal="center")
-for _,r in site_sum.iterrows():
-    ws3.append([r["site"],r["treatment"],r["n_images"],r["avg_insect"],r["avg_sediment"]])
-for i,w in enumerate([14,12,10,14,16],1):
-    ws3.column_dimensions[get_column_letter(i)].width=w
-
-wb.save("outputs/D1_analysis_results.xlsx")
-print(f"\nExcel saved!")
-print("\n── SUMMARY BY TREATMENT ──────────────────────────────")
-print(summary.to_string(index=False))
-print("\n── SUMMARY BY SITE ───────────────────────────────────")
-print(site_sum.to_string(index=False))
 print(f"\nDone! {len(rows)} images analyzed.")
+print("Result images saved to outputs/ folder.")
